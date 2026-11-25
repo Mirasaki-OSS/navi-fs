@@ -20,7 +20,7 @@ services:
       - ./config.yaml:/app/config.yaml:ro
       - ./logs:/app/logs:rw
       # You have to create volumes for all the resources you want to mount
-      # - /home/mirasaki/projects/navi-fs:/app/resources/navi-fs:rw
+      # - /home/mirasaki/dev/work/md/navi-fs:/app/resources/navi-fs:rw
 
 networks:
   navi-fs-network:

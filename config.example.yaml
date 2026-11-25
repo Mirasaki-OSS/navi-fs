@@ -6,10 +6,10 @@ master-api-key: __REPLACE_WITH_A_STRONG_API_KEY__
 
 resources:
   - slug: test-file
-    target: /home/mirasaki/projects/navi-fs/README.md
+    target: /home/mirasaki/dev/work/md/navi-fs/README.md
 
   - slug: test-directory
-    target: /home/mirasaki/projects/navi-fs/src
+    target: /home/mirasaki/dev/work/md/navi-fs/src
     permissions:
       - type: all
         api-key: __REPLACE_WITH_ANOTHER_STRONG_API_KEY__
