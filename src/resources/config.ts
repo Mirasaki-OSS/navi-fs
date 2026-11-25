@@ -53,7 +53,7 @@ export const validateConfig = () => {
   // Warn insecure api key
   if ((appConfig['master-api-key']?.length ?? 0) < Magic.RECOMMENDED_API_KEY_LENGTH) {
     logger.warn([
-      '[Configuration] "api-key" should be at least 128 characters.',
+      `[Configuration] "api-key" should be at least ${Magic.RECOMMENDED_API_KEY_LENGTH} characters.`,
       '  ↳ This security measure is in place to protect your information/privacy',
     ].join('\n'));
   }
