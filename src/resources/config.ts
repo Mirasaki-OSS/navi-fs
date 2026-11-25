@@ -6,6 +6,12 @@ import { configSchema } from './schema';
 
 type NodeEnvValues = 'production' | 'development' | 'staging'
 
+if (!fs.existsSync('config.yaml')) {
+  const err = new Error('Configuration file "config.yaml" not found, please create one using the example "config.example.yaml" and/or the README.md documentation');
+  err.stack = undefined;
+  throw err;
+}
+
 const config = configSchema.parse(yaml.load(fs.readFileSync('config.yaml', 'utf8')));
 
 /**
