@@ -1,5 +1,7 @@
 port: 9000
 log-level: info
+
+# Note: You can generate a strong API key using the following command: `openssl rand -hex 64`
 master-api-key: __REPLACE_WITH_A_STRONG_API_KEY__
 
 resources:
