@@ -304,7 +304,7 @@ const configSchema = z.object({
    */
   'log-level': z.enum(['debug', 'info', 'warn', 'error']).optional().default('info'),
   /**
-   * The list fo resources that should be accessible through the API.
+   * The list of resources that should be accessible through the API.
    *
    * A resource can be a file or a directory. If it's a directory, all files in that directory
    * will be accessible through the API. If it's a file, only that file will be accessible.
