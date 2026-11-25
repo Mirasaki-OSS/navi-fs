@@ -73,7 +73,7 @@ class ResourceValidator {
         fileNameHasExtension,
         fileExtension,
       });
-  
+
       if (fileNameHasExtension && !await ResourceUtils.checkFileExists(target)) {
         logger.warn(`Resource "${slug}" file does not exist: ${target}`);
       } else if (!fileNameHasExtension) {
