@@ -149,8 +149,13 @@ Retrieves file contents or lists directory contents.
 
 - If resource is a file: streams file or parses to requested format.
 - If directory: lists contents (recursively if requested).
+- Directory cursors must be relative and resolve within the resource root, including through symbolic links; outside paths receive `403`. Directory listings omit links to outside targets and dangling links.
 - Sets `Cache-Control`, `ETag`, `Last-Modified` headers.
 - Responds `304` if `If-Modified-Since` or `If-None-Match` headers match.
+
+Containment checks assume local filesystem paths are not concurrently modified by an untrusted
+user. Protect resource directories and their parent directories from untrusted local writes;
+the checks cannot prevent filesystem changes between validation and access.
 
 **Response:**
 

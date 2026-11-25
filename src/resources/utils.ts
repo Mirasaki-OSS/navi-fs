@@ -1,7 +1,8 @@
 import { constants } from 'fs';
-import { access, readdir, readFile, rm, stat, writeFile } from 'fs/promises';
+import { access, readdir, readFile, realpath, rm, stat, writeFile } from 'fs/promises';
 import path from 'path';
 import { logger } from '../logger';
+import { APIError, APIErrorCode } from '../modules/api-errors';
 import { ResponseType, responseTypes } from './schema';
 
 interface ResourceMeta {
@@ -17,6 +18,32 @@ interface ResourceMeta {
 }
 
 class ResourceUtils {
+  private static isContained(root: string, target: string): boolean {
+    const relative = path.relative(root, target);
+    return relative === '' || (relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative));
+  }
+
+  static async resolveDirectoryCursor(root: string, cursor: string | null): Promise<string> {
+    const resolvedRoot = path.resolve(root);
+    const target = path.resolve(resolvedRoot, cursor ?? '');
+    const forbidden = () => new APIError({
+      code: APIErrorCode.FORBIDDEN,
+      message: 'Cursor is outside the resource',
+      status: 403,
+    });
+
+    if ((cursor && path.isAbsolute(cursor)) || !ResourceUtils.isContained(resolvedRoot, target)) {
+      throw forbidden();
+    }
+
+    const [realRoot, realTarget] = await Promise.all([realpath(resolvedRoot), realpath(target)]);
+    if (!ResourceUtils.isContained(realRoot, realTarget)) {
+      throw forbidden();
+    }
+
+    return target;
+  }
+
   /**
    * Check if a file exists at the given path. Note that this should not be used when
    * trying to serve a resource, as quoted by the native Node.js documentation:
@@ -145,16 +172,40 @@ class ResourceUtils {
     directoryPath: string,
     recursive = false,
     extensionWhitelist: string[] = [],
+    resourceRoot = directoryPath,
   ): Promise<string[]> {
-    try {
-      const entries = await readdir(directoryPath);
-      const filePaths = entries.map((file) => path.join(directoryPath, file));
+    const realRoot = await realpath(resourceRoot);
+    const list = async (directory: string, ancestors: Set<string>): Promise<string[]> => {
+      const realDirectory = await realpath(directory);
+      if (!ResourceUtils.isContained(realRoot, realDirectory) || ancestors.has(realDirectory)) {
+        return [];
+      }
+
+      const nextAncestors = new Set(ancestors).add(realDirectory);
+      const entries = await readdir(directory, { withFileTypes: true });
       const results = await Promise.all(
-        filePaths.map(async (filePath) => {
-          const isDir = await ResourceUtils.isDirectory(filePath);
+        entries.map(async (entry) => {
+          const filePath = path.join(directory, entry.name);
+          if (entry.isSymbolicLink()) {
+            let realTarget: string;
+            try {
+              realTarget = await realpath(filePath);
+            } catch (error) {
+              if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+                logger.debug(`Skipping dangling symbolic link: ${filePath}`);
+                return [];
+              }
+              throw error;
+            }
+            if (!ResourceUtils.isContained(realRoot, realTarget)) {
+              return [];
+            }
+          }
+
+          const isDir = entry.isDirectory() || (entry.isSymbolicLink() && (await stat(filePath)).isDirectory());
 
           if (isDir && recursive) {
-            return await ResourceUtils.listFiles(filePath, true, extensionWhitelist);
+            return await list(filePath, nextAncestors);
           }
 
           if (isDir) {
@@ -170,10 +221,9 @@ class ResourceUtils {
       );
 
       return results.flat();
-    } catch (error) {
-      logger.debug(`Error listing files in directory: ${directoryPath}`, error);
-      return [];
-    }
+    };
+
+    return list(directoryPath, new Set());
   }
 
   static async readFile(filePath: string): Promise<{ data: string; meta: ResourceMeta }> {

@@ -242,7 +242,7 @@ class ResourceHandler {
       return;
     }
 
-    const absolutePaths = await ResourceUtils.listFiles(currentLocation, recursive, resource.extensions ?? []);
+    const absolutePaths = await ResourceUtils.listFiles(currentLocation, recursive, resource.extensions ?? [], resource.target);
     const relativePaths = absolutePaths.map((filePath) => path.relative(currentLocation, filePath));
 
     logger.debug(`Resolving (route) options for: ${resource.slug}`, {
@@ -471,7 +471,7 @@ class ResourceHandler {
     const cursor = (Array.isArray(query.cursor) ? query.cursor.join('/') : query.cursor?.toString()) || null;
     const currentLocation = resource.type === 'file'
       ? await ResourceHandler.getResourceFile(resource, { cursor })
-      : path.resolve(resource.target, cursor ?? '');
+      : await ResourceUtils.resolveDirectoryCursor(resource.target, cursor);
 
     if (req.method === 'GET') {
       return await this.handleGetRequest(resource, {

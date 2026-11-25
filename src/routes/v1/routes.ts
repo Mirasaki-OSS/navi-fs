@@ -24,7 +24,7 @@ v1Router.get(
   Authentication.requireAuthorization,
   async (...args) => {
     const handler = await ResourceHandler.getInstance();
-    handler.handleRequest(...args);
+    return handler.handleRequest(...args);
   },
 );
 
