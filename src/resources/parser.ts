@@ -49,16 +49,20 @@ class ResourceValidator {
       extensions,
     });
 
+    let fileOrFilesExists = true;
+
     if (isDirectory) {
       if (extensions === null || extensions.length < 1) {
         const hasFiles = await ResourceUtils.hasFiles(target, true);
         if (!hasFiles) {
           logger.warn(`Resource "${slug}" has no files in the target directory: ${target}`);
+          fileOrFilesExists = false;
         }
       } else {
         const hasFiles = await ResourceUtils.hasFiles(target, true, extensions);
         if (!hasFiles) {
           logger.warn(`Resource "${slug}" has no files with the specified extensions`);
+          fileOrFilesExists = false;
         }
       }
     } else {
@@ -73,13 +77,15 @@ class ResourceValidator {
         fileNameHasExtension,
         fileExtension,
       });
-
+  
       if (fileNameHasExtension && !await ResourceUtils.checkFileExists(target)) {
         logger.warn(`Resource "${slug}" file does not exist: ${target}`);
+        fileOrFilesExists = false;
       } else if (!fileNameHasExtension) {
         if (extensions === null || extensions.length < 1) {
           if (!await ResourceUtils.hasFiles(target, true)) {
             logger.warn(`Resource "${slug}" has no files in the target directory: ${target}`);
+            fileOrFilesExists = false;
           }
         } else {
           const anyExists = await Promise.all(
@@ -90,9 +96,19 @@ class ResourceValidator {
     
           if (!anyExists) {
             logger.warn(`Resource "${slug}" has no file with the specified extensions`);
+            fileOrFilesExists = false;
           }
         }
       }
+    }
+
+    if (fileOrFilesExists) {
+      logger.info(`Resource "${slug}" exists and is valid`, {
+        slug,
+        target,
+        type: isDirectory ? 'directory' : 'file',
+        path: target,
+      });
     }
   };
 
