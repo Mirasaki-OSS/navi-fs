@@ -1,9 +1,11 @@
-import type { Response } from 'express';
-import { APIError } from './modules/api-errors';
+import type { Response } from "express";
+import { APIError } from "./modules/api-errors";
 
-type TypedResponseData = APIError | {
-  data: NonNullable<unknown>;
-};
+type TypedResponseData =
+  | APIError
+  | {
+      data: NonNullable<unknown>;
+    };
 
 export const typedResponse = <T extends TypedResponseData>(
   res: Response,

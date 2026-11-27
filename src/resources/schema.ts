@@ -1,45 +1,38 @@
-import crypto from 'crypto';
-import { z } from 'zod';
+import crypto from "node:crypto";
+import { z } from "zod";
+import Magic from "../magic";
 
 const slugRegex = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
-const slugErrorMessage = 'Slug must be lowercase, alphanumeric and can only contain dashes (-)';
-const slug = z.string().regex(slugRegex, slugErrorMessage).min(1).max(64);
+const slugErrorMessage = "Slug must be lowercase, alphanumeric and can only contain dashes (-)";
+const slug = z.string().regex(slugRegex, slugErrorMessage).min(1).max(Magic.MAX_SLUG_LENGTH);
 
 const generateApiKey = (
-  format: 'hex' | 'base64' = 'hex',
-  length = 32,
+  format: "hex" | "base64" = "hex",
+  length = Magic.MIN_GENERATED_API_KEY_BYTES,
 ): string => {
-  if (length < 32) {
-    throw new Error('API key length should be at least 32 bytes.');
+  if (length < Magic.MIN_GENERATED_API_KEY_BYTES) {
+    throw new Error(
+      `API key length should be at least ${Magic.MIN_GENERATED_API_KEY_BYTES} bytes.`,
+    );
   }
 
   return crypto.randomBytes(length).toString(format);
 };
 
 const preventDefaultApiKey = (val: string): boolean => {
-  if (process.env.NODE_ENV === 'development') {
+  if (process.env.NODE_ENV === "development") {
     return true;
   }
-  return val !== '__REPLACE_WITH_A_STRONG_API_KEY__';
+  return val !== "__REPLACE_WITH_A_STRONG_API_KEY__";
 };
-const defaultApiKeyMessage = `You haven't changed the default API key. Please change it to a strong password-like value, like ${generateApiKey('hex', 32)}`;
+const defaultApiKeyMessage = `You haven't changed the default API key. Please change it to a strong password-like value, like ${generateApiKey("hex")}`;
 
-const responseTypes = [
-  'stream',
-  'json',
-  'xml',
-  'html',
-  'text',
-  'csv',
-  'yaml',
-  'toml',
-] as const;
+const responseTypes = ["stream", "json", "xml", "html", "text", "csv", "yaml", "toml"] as const;
 
-type ResponseType = typeof responseTypes[number];
+type ResponseType = (typeof responseTypes)[number];
 
-const sizeLimitUnit = z.enum(['bytes', 'lines', 'files']);
+const sizeLimitUnit = z.enum(["bytes", "lines", "files"]);
 
-// [DEV] Implement size policy
 const sizePolicySchema = z.object({
   /**
    * The type of size limit being applied.
@@ -72,7 +65,7 @@ const sizePolicySchema = z.object({
    * - "warn" = include but log warning (dev mode)
    * @default "truncate"
    */
-  mode: z.enum(['truncate', 'reject', 'warn']).optional().default('truncate'),
+  mode: z.enum(["truncate", "reject", "warn"]).optional().default("truncate"),
 
   /**
    * Optional: Whether to apply size limit cumulatively across all files.
@@ -82,70 +75,72 @@ const sizePolicySchema = z.object({
   cumulative: z.boolean().optional().default(false),
 });
 
-export const cacheControlPolicySchema = z.object({
-  /**
-   * Number of seconds the resource is considered fresh for browsers and clients.
-   * @example 3600 // 1 hour
-   */
-  'max-age': z.number().int().positive().optional(),
+export const cacheControlPolicySchema = z
+  .object({
+    /**
+     * Number of seconds the resource is considered fresh for browsers and clients.
+     * @example 3600 // 1 hour
+     */
+    "max-age": z.number().int().positive().optional(),
 
-  /**
-   * Number of seconds the resource is fresh for shared caches (like CDNs).
-   * Overrides 'max-age' for shared caches.
-   * @example 7200 // 2 hours
-   */
-  's-maxage': z.number().int().positive().optional(),
+    /**
+     * Number of seconds the resource is fresh for shared caches (like CDNs).
+     * Overrides 'max-age' for shared caches.
+     * @example 7200 // 2 hours
+     */
+    "s-maxage": z.number().int().positive().optional(),
 
-  /**
-   * Forces caches to validate the response with the server before reuse.
-   * @default false
-   */
-  'no-cache': z.boolean().optional(),
+    /**
+     * Forces caches to validate the response with the server before reuse.
+     * @default false
+     */
+    "no-cache": z.boolean().optional(),
 
-  /**
-   * Prevents the response from being cached or stored by any cache.
-   * @default false
-   */
-  'no-store': z.boolean().optional(),
+    /**
+     * Prevents the response from being cached or stored by any cache.
+     * @default false
+     */
+    "no-store": z.boolean().optional(),
 
-  /**
-   * Indicates how long (in seconds) a stale resource can be served 
-   * **while** revalidation happens in the background.
-   * This helps improve perceived performance by avoiding blocking on revalidation.
-   * 
-   * @example 86400 // Allow serving stale responses for 1 day during background revalidation
-   */
-  'stale-while-revalidate': z.number().int().positive().optional(),
+    /**
+     * Indicates how long (in seconds) a stale resource can be served
+     * **while** revalidation happens in the background.
+     * This helps improve perceived performance by avoiding blocking on revalidation.
+     *
+     * @example 86400 // Allow serving stale responses for 1 day during background revalidation
+     */
+    "stale-while-revalidate": z.number().int().positive().optional(),
 
-  /**
-   * Indicates how long (in seconds) a stale resource can be served 
-   * **if an error occurs** when attempting to revalidate (e.g., network/server issues).
-   * This provides resilience by allowing clients/CDNs to fall back to stale content.
-   * 
-   * @example 604800 // Allow serving stale responses for 1 week if the origin server errors
-   */
-  'stale-if-error': z.number().int().positive().optional(),
+    /**
+     * Indicates how long (in seconds) a stale resource can be served
+     * **if an error occurs** when attempting to revalidate (e.g., network/server issues).
+     * This provides resilience by allowing clients/CDNs to fall back to stale content.
+     *
+     * @example 604800 // Allow serving stale responses for 1 week if the origin server errors
+     */
+    "stale-if-error": z.number().int().positive().optional(),
 
-  /**
-   * Allows caching by any cache (browser or CDN).
-   * Useful for public resources.
-   * @default false
-   */
-  public: z.boolean().optional(),
+    /**
+     * Allows caching by any cache (browser or CDN).
+     * Useful for public resources.
+     * @default false
+     */
+    public: z.boolean().optional(),
 
-  /**
-   * Allows caching only by the browser, not by shared caches like CDNs.
-   * @default false
-   */
-  private: z.boolean().optional(),
+    /**
+     * Allows caching only by the browser, not by shared caches like CDNs.
+     * @default false
+     */
+    private: z.boolean().optional(),
 
-  /**
-   * Indicates that the resource will not be updated during its freshness lifetime.
-   * Clients can skip revalidation.
-   * @default false
-   */
-  immutable: z.boolean().optional(),
-}).strict();
+    /**
+     * Indicates that the resource will not be updated during its freshness lifetime.
+     * Clients can skip revalidation.
+     * @default false
+     */
+    immutable: z.boolean().optional(),
+  })
+  .strict();
 
 const permissionsSchema = z.object({
   /**
@@ -156,23 +151,18 @@ const permissionsSchema = z.object({
    * - `execute` - The resource is executable by the client
    * - `all` - The client can perform all actions on the resource
    */
-  type: z.enum([
-    'read',
-    'write',
-    'delete',
-    'execute',
-  ])
-    .or(z.array(z.enum([
-      'read',
-      'write',
-      'delete',
-      'execute',
-    ])))
-    .or(z.literal('all')),
+  type: z
+    .enum(["read", "write", "delete", "execute"])
+    .or(z.array(z.enum(["read", "write", "delete", "execute"])))
+    .or(z.literal("all")),
   /**
    * The API key that is allowed to access this resource, with the specified permission type.
    */
-  'api-key': z.string().min(32).max(256).refine(preventDefaultApiKey, { message: defaultApiKeyMessage }),
+  "api-key": z
+    .string()
+    .min(Magic.MIN_API_KEY_LENGTH)
+    .max(Magic.MAX_API_KEY_LENGTH)
+    .refine(preventDefaultApiKey, { message: defaultApiKeyMessage }),
 });
 
 const executableSchema = z.object({
@@ -189,7 +179,10 @@ const executableSchema = z.object({
    * @example ["arg1", "arg2"]
    * @default []
    */
-  args: z.union([z.string(), z.array(z.string())]).optional().default([]),
+  args: z
+    .union([z.string(), z.array(z.string())])
+    .optional()
+    .default([]),
   /**
    * The working directory to run the command in.
    * @example "path/to/working/directory"
@@ -201,19 +194,19 @@ const executableSchema = z.object({
    * @example { "ENV_VAR": "value" }
    * @default {}
    */
-  env: z.record(z.string()).optional().default({}),
+  env: z.record(z.string(), z.string()).optional().default({}),
   /**
-   * Whether or not the environment variables from this running process should
-   * be copied over to the command.
-   * @default false
-   */
-  'inject-current-env': z.boolean().optional().default(false),
-  /**
-   * Determines how long to wait for the command to finish before timing out.
+   * Determines how long to wait for the command to finish before timing out, in seconds.
    * This can be useful for long-running commands or scripts.
    * @default 600 // 10 minutes
    */
-  timeout: z.number().int().positive().optional().default(600),
+  timeout: z
+    .number()
+    .int()
+    .positive()
+    .max(Magic.MAX_EXECUTION_TIMEOUT_SECONDS)
+    .optional()
+    .default(Magic.DEFAULT_EXECUTION_TIMEOUT_SECONDS),
   /**
    * Determines if the command should be run in the background or not.
    * If true, the command will be run in a detached process.
@@ -224,7 +217,7 @@ const executableSchema = z.object({
    * The shell to use when running the command.
    * @example "bash"
    */
-  shell: z.string().optional().default('/bin/bash'),
+  shell: z.string().optional().default("/bin/bash"),
 });
 
 const resourceSchema = z.object({
@@ -249,17 +242,24 @@ const resourceSchema = z.object({
    * - If the resource is a directory and this list is empty, all files will be included.
    * - If the resource is a file, the first file that matches `target` and has an extension in this list will be used.
    */
-  extensions: z.union([z.array(z.string()), z.null()]).optional().nullable().default(null),
+  extensions: z
+    .union([z.array(z.string()), z.null()])
+    .optional()
+    .nullable()
+    .default(null),
   /**
    * Determines size constraints/limits for this resource.
    */
-  'size-policy': z.union([sizePolicySchema, z.array(sizePolicySchema).max(10)]).optional().nullable().default(null),
+  "size-policy": z
+    .union([sizePolicySchema, z.array(sizePolicySchema).max(Magic.MAX_SIZE_POLICIES)])
+    .nullable()
+    .default(null),
   /**
    * Defines HTTP caching behavior for the resource. This configuration is
    * used to generate the `Cache-Control` header, which instructs the client
    * and any intermediate caches on how to handle the resource.
    */
-  'cache-control': cacheControlPolicySchema.optional().nullable().default(null),
+  "cache-control": cacheControlPolicySchema.optional().nullable().default(null),
   /**
    * Fine-grained permissions for this resource. If not specified, the resource
    * is accessible to all clients using the `master-api-key`.
@@ -280,7 +280,11 @@ const configSchema = z.object({
    * Note: This is not a password, but an API key. Clients authenticate with
    * the API by sending this key in the `x-api-key` header.
    */
-  'master-api-key': z.string().min(32).max(256).refine(preventDefaultApiKey, { message: defaultApiKeyMessage }),
+  "master-api-key": z
+    .string()
+    .min(Magic.MIN_API_KEY_LENGTH)
+    .max(Magic.MAX_API_KEY_LENGTH)
+    .refine(preventDefaultApiKey, { message: defaultApiKeyMessage }),
   /**
    * Which port this application should run on, between `0` and `65535`
    *
@@ -294,7 +298,7 @@ const configSchema = z.object({
    *
    * @throws {Error} If the port is already in use
    */
-  port: z.number().int().min(1).max(65535),
+  port: z.number().int().min(1).max(Magic.VALID_PORT_RANGE_MAX),
   /**
    * The amount of information that should be logged to the console
    * - `debug` - All information
@@ -302,7 +306,7 @@ const configSchema = z.object({
    * - `warn` - Only warnings and errors
    * - `error` - Only errors
    */
-  'log-level': z.enum(['debug', 'info', 'warn', 'error']).optional().default('info'),
+  "log-level": z.enum(["debug", "info", "warn", "error"]).optional().default("info"),
   /**
    * The list of resources that should be accessible through the API.
    *
@@ -314,8 +318,8 @@ const configSchema = z.object({
 
 type Config = z.infer<typeof configSchema>;
 type Executable = z.infer<typeof executableSchema>;
-
+type SizePolicy = z.infer<typeof sizePolicySchema>;
 type CacheControlPolicy = z.infer<typeof cacheControlPolicySchema>;
 
-export { CacheControlPolicy, Config, configSchema, Executable, resourceSchema, ResponseType, responseTypes };
-
+export type { CacheControlPolicy, Config, Executable, ResponseType, SizePolicy };
+export { configSchema, resourceSchema, responseTypes, sizeLimitUnit };

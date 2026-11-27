@@ -14,6 +14,11 @@
   Stream, serve, and execute using simple configuration and REST-style access.
 </p>
 
+> [!CAUTION]
+> All versions before v2 are unmaintained, unsupported, and unsafe to use. They have
+> unpatched security vulnerabilities. Stop using those versions and migrate to v2
+> as soon as possible. The latest release is v2 or higher.
+
 ## 🔨 Installation
 
 ### 📦 Run as a Docker container (preferred)
@@ -55,10 +60,10 @@ resources:
       - .js
     size-policy:
       - unit: bytes
-        limit: 1048576  # 1 MB
+        limit: 1048576 # 1 MB
         mode: truncate
         cumulative: false
-        extensions: [".log", ".txt"]
+        extensions: [ ".log", ".txt" ]
         pattern: ".*\\.log$"
     cache-control:
       max-age: 3600
@@ -71,19 +76,20 @@ resources:
       private: false
       immutable: false
     permissions:
-      - type: [read, write]
+      - type: [ read, write ]
         api-key: "6cbf9926bc7c4ea49ad0ffcb3a6d31e103eb8c7209c69df173bfe1f5f90aa9a3"
+      - type: delete
+        api-key: "79b29829cebf4b65bb63ff51cdbeaad4f9b8e59aee93e2e5b709b2ef943f3468"
 
   - slug: run-script
     target: /usr/local/bin/scripts
     executable:
       command: "bash"
-      args: ["hello-world.sh"]
+      args: [ "hello-world.sh" ]
       cwd: "/usr/local/bin/scripts"
       env:
         MODE: "production"
-      inject-current-env: true
-      timeout: 300
+      timeout: 300 # seconds
       detached: false
       shell: "/bin/bash"
     permissions:
@@ -102,7 +108,7 @@ resources:
 
 NaviFS exposes a RESTful API to interact with your local files via secure endpoints.
 
-All requests must include a valid `x-api-key` header.
+API requests require a valid `x-api-key` header, except for `OPTIONS` requests and the `GET /` endpoint, which are public.
 
 ---
 
@@ -150,8 +156,11 @@ Retrieves file contents or lists directory contents.
 - If resource is a file: streams file or parses to requested format.
 - If directory: lists contents (recursively if requested).
 - Directory cursors must be relative and resolve within the resource root, including through symbolic links; outside paths receive `403`. Directory listings omit links to outside targets and dangling links.
-- Sets `Cache-Control`, `ETag`, `Last-Modified` headers.
+- Missing targets return `404`.
+- Sets `Cache-Control` (`no-store` by default), `ETag`, and `Last-Modified` headers for files.
 - Responds `304` if `If-Modified-Since` or `If-None-Match` headers match.
+- Streamed files support single byte ranges: satisfiable `Range` requests return `206` with `Content-Range`; unsatisfiable ranges return `416` with `Content-Range: bytes */<size>`. Malformed or multiple disjoint ranges are ignored.
+- `If-Range` supports `Last-Modified` dates for files unchanged for at least 60 seconds. File ETags are weak and cannot be used as `If-Range` validators. Non-stream formats ignore ranges.
 
 Containment checks assume local filesystem paths are not concurrently modified by an untrusted
 user. Protect resource directories and their parent directories from untrusted local writes;
@@ -192,6 +201,7 @@ Plain string content to be written to file.
 
 - Only works if target is a file.
 - Responds with `400` if request body is invalid.
+- Text request bodies are limited to 100 KiB (102,400 bytes); larger bodies receive `413`. This preserves Express's default limit and bounds the memory used to buffer a request body.
 
 **Response:**  
 `201 Created` on success.
@@ -221,13 +231,13 @@ Deletes a file or directory.
 
 ---
 
-## 🧠 `EXECUTE /api/v1/:slug`
+## 🧠 `POST /api/v1/:slug/execute`
 
-Executes a command via SSE (Server-Sent Events).
+Executes a configured command and returns SSE (Server-Sent Events). The `execute` permission is required; write permission alone does not grant execution.
 
 **Query Parameters (optional):**
 
-- `cursor` – Optional execution path override.
+- `cursor` – Optional directory relative to a directory resource root. If supplied, it overrides the configured working directory and must resolve inside the root. File resources cannot use an execution cursor.
 
 **Headers:**
 
@@ -237,11 +247,15 @@ Executes a command via SSE (Server-Sent Events).
 **Behavior:**
 
 - Only allowed for resources that have an `executable` configuration defined.
+- Without a cursor, the configured `cwd` is used; if unset, the server process's working directory is used.
+- The configured `timeout` is in seconds (default: 600). Execution failures after the SSE response starts are sent as `error` events.
 - Streams `stdout`, `stderr`, `exit`, and `error` events.
+
+Commands run with the server process's operating-system privileges; resource containment is not a command sandbox. Configure executables and grant execute keys only to trusted parties. A timeout or client disconnect terminates the spawned process, not necessarily every process it creates; detached processes are not terminated on disconnect.
 
 **Response Format (SSE):**
 
-```json
+```text
 event: stdout
 data: Hello from stdout
 
@@ -256,7 +270,7 @@ data: Process exited with code 0
 
 ## 🧪 `HEAD /api/v1/:slug`
 
-Returns basic info and cache headers.
+Returns the same status and headers as GET without a response body. Requires read permission. Range requests are ignored for HEAD.
 
 **Headers:**
 
@@ -264,42 +278,42 @@ Returns basic info and cache headers.
 
 **Behavior:**
 
-- Sets `Cache-Control` based on resource configuration.
-- Returns `200 OK`.
+- Applies the same cursor containment and missing-target checks as GET.
 
 ---
 
 ## ⚙️ `OPTIONS /api/v1/:slug`
 
-Returns allowed methods.
+Public endpoint returning allowed methods for an existing resource. An unknown resource returns `404`.
 
 **Response Headers:**
 
 ```json
-Allow: HEAD, OPTIONS, GET, POST, DELETE, EXECUTE
+Allow: GET, HEAD, POST, DELETE, OPTIONS
 ```
+
+For `/api/v1/:slug/execute`, the header is `POST, OPTIONS`; for `/api/v1/` and `/`, it is `GET, HEAD, OPTIONS`. Unsupported methods on these routes return a JSON `405` with the corresponding `Allow` header. Public OPTIONS does not enable CORS by itself.
 
 ---
 
 ### ⚠️ Error Handling
 
-All errors return a consistent format:
+Errors detected before the response starts return JSON:
 
 ```json
 {
   "error": {
-    "code": "BAD_REQUEST" | "NOT_FOUND" | "METHOD_NOT_ALLOWED" | "INTERNAL_ERROR",
+    "code": "NOT_FOUND",
     "message": "Human-readable error message",
-    "details": {
-      "slug": "...",
-      "query": { ... },
-      "error": "Optional extra error string"
-    }
+    "status": 404
   }
 }
 ```
 
-> In development mode, error messages may include stack traces or exception details.
+- Errors may include a `details` object.
+- Codes include `UNAUTHORIZED`, `FORBIDDEN`, `BAD_REQUEST`, `NOT_FOUND`, `METHOD_NOT_ALLOWED`, `PRECONDITION_FAILED`, `PAYLOAD_TOO_LARGE`, `UNSUPPORTED_MEDIA_TYPE`, `RANGE_NOT_SATISFIABLE`, `TOO_MANY_REQUESTS`, and `INTERNAL_ERROR`.
+- Unexpected errors have a generic message in production; development mode may expose exception messages.
+- `Execution` failures are reported as SSE events.
 
 ## 🛣️ Roadmap
 
@@ -307,13 +321,13 @@ This section outlines the current and upcoming features and enhancements planned
 
 ### 🚀 Current Milestones
 
-- [ ] **Improved Error Handling:** Better error messages with more specific error codes.
-- [ ] **File Streaming Enhancements:** Optimizing file streaming (through Ranges) for large file resources.
+- [x] **Improved Error Handling:** Specific error codes and messages for common failures.
+- [x] **File Streaming Improvements:** Stream large files and support single byte ranges and conditional requests.
 - [ ] **Search Functionality:** Add advanced search and filtering capabilities for resource queries.
 - [ ] **Cloud Storage Integrations:** Support for external cloud storage providers (e.g., AWS S3, Google Cloud Storage).
 - [ ] **Frontend Panel/Dashboard** for administrators (long-term vision).
-    - [ ] **User Authentication & Authorization:** Allow users to create accounts, authenticate via OAuth, and manage their API keys.
-    - [ ] **Resource Management Dashboard:** Build an admin interface for better management and exploration of resources.
+  - [ ] **User Authentication & Authorization:** Allow users to create accounts, authenticate via OAuth, and manage their API keys.
+  - [ ] **Resource Management Dashboard:** Build an admin interface for better management and exploration of resources.
 
 ### 📖 Roadmap Entry: OS-Level File Caching Documentation
 
