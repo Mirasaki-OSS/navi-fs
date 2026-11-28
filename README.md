@@ -182,12 +182,13 @@ the checks cannot prevent filesystem changes between validation and access.
 
 ## 📥 `POST /api/v1/:slug`
 
-Writes to a file.
+Writes to a file or creates a new file.
 
 **Query Parameters (optional):**
 
-- `cursor` – Path of file to write to.
+- `cursor` – Path of file to write to or create.
 - `encoding` – Optional, e.g. `utf-8`, `base64`, etc.
+- `create` – If `true`, creates the file and parent directories if they don't exist. If not provided or `false`, the file must already exist.
 
 **Headers:**
 
@@ -199,7 +200,8 @@ Plain string content to be written to file.
 
 **Behavior:**
 
-- Only works if target is a file.
+- **Without `create` parameter (or `create=false`):** Only works if target is a file. Responds with `400` if the target does not exist or is a directory.
+- **With `create=true`:** Creates the file if it doesn't exist, including all parent directories as needed. If the file already exists, its contents are overwritten. If the target path exists as a directory, responds with `400`.
 - Responds with `400` if request body is invalid.
 - Text request bodies are limited to 100 KiB (102,400 bytes); larger bodies receive `413`. This preserves Express's default limit and bounds the memory used to buffer a request body.
 
