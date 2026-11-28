@@ -1,8 +1,9 @@
-import { constants } from 'fs';
-import { access, readdir, readFile, rm, stat, writeFile } from 'fs/promises';
-import path from 'path';
-import { logger } from '../logger';
-import { ResponseType, responseTypes } from './schema';
+import { constants } from "node:fs";
+import { access, mkdir, readdir, readFile, realpath, rm, stat, writeFile } from "node:fs/promises";
+import path from "node:path";
+import { logger } from "../logger";
+import { APIError, APIErrorCode } from "../modules/api-errors";
+import { type ResponseType, responseTypes, type SizePolicy } from "./schema";
 
 interface ResourceMeta {
   filePath: string;
@@ -17,6 +18,63 @@ interface ResourceMeta {
 }
 
 class ResourceUtils {
+  private static isContained(root: string, target: string): boolean {
+    const relative = path.relative(root, target);
+    return (
+      relative === "" ||
+      (relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative))
+    );
+  }
+
+  static async resolveDirectoryCursor(root: string, cursor: string | null, allowNonExistent = false): Promise<string> {
+    const resolvedRoot = path.resolve(root);
+    const target = path.resolve(resolvedRoot, cursor ?? "");
+    const forbidden = () =>
+      new APIError({
+        code: APIErrorCode.FORBIDDEN,
+        message: "Cursor is outside the resource",
+        status: 403,
+      });
+
+    if ((cursor && path.isAbsolute(cursor)) || !ResourceUtils.isContained(resolvedRoot, target)) {
+      throw forbidden();
+    }
+
+    const realRoot = await realpath(resolvedRoot);
+    let realTarget = target;
+    
+    if (!allowNonExistent) {
+      realTarget = await realpath(target);
+    } else {
+      try {
+        realTarget = await realpath(target);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+          // For non-existent paths, resolve the parent directory and check containment
+          const parentPath = path.dirname(target);
+          try {
+            realTarget = await realpath(parentPath);
+            realTarget = path.resolve(realTarget, path.basename(target));
+          } catch (parentError) {
+            // If parent doesn't exist either, still proceed with the calculated path
+            if ((parentError as NodeJS.ErrnoException).code !== "ENOENT") {
+              throw parentError;
+            }
+            realTarget = target;
+          }
+        } else {
+          throw error;
+        }
+      }
+    }
+    
+    if (!ResourceUtils.isContained(realRoot, realTarget)) {
+      throw forbidden();
+    }
+
+    return target;
+  }
+
   /**
    * Check if a file exists at the given path. Note that this should not be used when
    * trying to serve a resource, as quoted by the native Node.js documentation:
@@ -30,15 +88,22 @@ class ResourceUtils {
       await access(filePath, constants.F_OK);
       return true;
     } catch (error) {
-      logger.debug(`File does not exist: ${filePath}`, error);
-      return false;
+      if (
+        error instanceof Error &&
+        "code" in error &&
+        (error.code === "ENOENT" || error.code === "ENOTDIR")
+      ) {
+        logger.debug({
+          message: `File does not exist: ${filePath}`,
+          error,
+        });
+        return false;
+      }
+      throw error;
     }
   }
 
-  static resolveResponseType(
-    input?: string,
-    defaultType: ResponseType = 'stream',
-  ): ResponseType {
+  static resolveResponseType(input?: string, defaultType: ResponseType = "stream"): ResponseType {
     if (responseTypes.includes(input as ResponseType)) {
       return input as ResponseType;
     }
@@ -46,7 +111,16 @@ class ResourceUtils {
     const mimeType = input ? ResourceUtils.getMimeType(input) : null;
 
     if (mimeType) {
-      return mimeType as ResponseType;
+      const mimeToResponseType: Record<string, ResponseType> = {
+        "text/plain": "text",
+        "application/json": "json",
+        "application/xml": "xml",
+        "text/html": "html",
+        "text/csv": "csv",
+        "application/x-yaml": "yaml",
+        "application/toml": "toml",
+      };
+      return mimeToResponseType[mimeType] ?? defaultType;
     }
 
     const ext = input ? ResourceUtils.getFileExtension(input) : null;
@@ -63,7 +137,7 @@ class ResourceUtils {
    */
   static getFileExtension(filePath: string): string {
     const ext = path.extname(filePath);
-    return ext ? ext.slice(1) : '';
+    return ext ? ext.slice(1) : "";
   }
 
   /**
@@ -72,17 +146,24 @@ class ResourceUtils {
    *
    * Please note this only includes MIME types for our supported
    * (response) formats.
+   *
+   * Handles both filenames (e.g., 'file.txt') and bare extensions (e.g., 'txt')
    */
   static getMimeType(filePath: string): string | null {
-    const ext = ResourceUtils.getFileExtension(filePath);
+    let ext = ResourceUtils.getFileExtension(filePath).toLowerCase();
+
+    if (!ext) {
+      ext = filePath.toLowerCase();
+    }
+
     const mimeTypes: Record<string, string> = {
-      json: 'application/json',
-      xml: 'application/xml',
-      html: 'text/html',
-      text: 'text/plain',
-      csv: 'text/csv',
-      yaml: 'application/x-yaml',
-      toml: 'application/toml',
+      txt: "text/plain",
+      json: "application/json",
+      xml: "application/xml",
+      html: "text/html",
+      csv: "text/csv",
+      yaml: "application/x-yaml",
+      toml: "application/toml",
     };
     return mimeTypes[ext] || null;
   }
@@ -95,7 +176,10 @@ class ResourceUtils {
       const stats = await stat(filePath);
       return stats.isDirectory();
     } catch (error) {
-      logger.debug(`Path is not a directory: ${filePath}`, error);
+      logger.debug({
+        message: `Path is not a directory: ${filePath}`,
+        error,
+      });
       return false;
     }
   }
@@ -113,9 +197,10 @@ class ResourceUtils {
     try {
       const entries = await readdir(directoryPath);
 
-      const filteredFiles = extensionWhitelist.length
-        ? entries.filter((file) => extensionWhitelist.some((ext) => file.endsWith(ext)))
-        : entries;
+      const filteredFiles =
+        extensionWhitelist.length > 0
+          ? entries.filter((file) => extensionWhitelist.some((ext) => file.endsWith(ext)))
+          : entries;
 
       if (filteredFiles.length > 0) {
         return true;
@@ -145,23 +230,51 @@ class ResourceUtils {
     directoryPath: string,
     recursive = false,
     extensionWhitelist: string[] = [],
+    resourceRoot = directoryPath,
   ): Promise<string[]> {
-    try {
-      const entries = await readdir(directoryPath);
-      const filePaths = entries.map((file) => path.join(directoryPath, file));
+    const realRoot = await realpath(resourceRoot);
+    const list = async (directory: string, ancestors: Set<string>): Promise<string[]> => {
+      const realDirectory = await realpath(directory);
+      if (!ResourceUtils.isContained(realRoot, realDirectory) || ancestors.has(realDirectory)) {
+        return [];
+      }
+
+      const nextAncestors = new Set(ancestors).add(realDirectory);
+      const entries = await readdir(directory, { withFileTypes: true });
       const results = await Promise.all(
-        filePaths.map(async (filePath) => {
-          const isDir = await ResourceUtils.isDirectory(filePath);
+        entries.map(async (entry) => {
+          const filePath = path.join(directory, entry.name);
+          if (entry.isSymbolicLink()) {
+            let realTarget: string;
+            try {
+              realTarget = await realpath(filePath);
+            } catch (error) {
+              if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+                logger.debug(`Skipping dangling symbolic link: ${filePath}`);
+                return [];
+              }
+              throw error;
+            }
+            if (!ResourceUtils.isContained(realRoot, realTarget)) {
+              return [];
+            }
+          }
+
+          const isDir =
+            entry.isDirectory() || (entry.isSymbolicLink() && (await stat(filePath)).isDirectory());
 
           if (isDir && recursive) {
-            return await ResourceUtils.listFiles(filePath, true, extensionWhitelist);
+            return await list(filePath, nextAncestors);
           }
 
           if (isDir) {
             return [filePath];
           }
 
-          if (extensionWhitelist.length && !extensionWhitelist.some((ext) => filePath.endsWith(ext))) {
+          if (
+            extensionWhitelist.length > 0 &&
+            !extensionWhitelist.some((ext) => filePath.endsWith(ext))
+          ) {
             return [];
           }
 
@@ -170,23 +283,14 @@ class ResourceUtils {
       );
 
       return results.flat();
-    } catch (error) {
-      logger.debug(`Error listing files in directory: ${directoryPath}`, error);
-      return [];
-    }
+    };
+
+    return list(directoryPath, new Set());
   }
 
   static async readFile(filePath: string): Promise<{ data: string; meta: ResourceMeta }> {
     try {
-      const fileExists = await ResourceUtils.checkFileExists(filePath);
-      if (!fileExists) {
-        throw new Error(`File not found: ${filePath}`);
-      }
-
-      const [data, stats] = await Promise.all([
-        readFile(filePath, 'utf-8'),
-        stat(filePath),
-      ]);
+      const [data, stats] = await Promise.all([readFile(filePath, "utf-8"), stat(filePath)]);
 
       return {
         data,
@@ -197,38 +301,190 @@ class ResourceUtils {
           fileType: ResourceUtils.getFileExtension(filePath),
           lastModified: stats.mtime,
           createdAt: stats.birthtime,
-          mimeType: 'application/octet-stream', // Default MIME type, can be improved
-          encoding: 'utf-8', // Default encoding, can be improved
+          mimeType: "application/octet-stream", // Default MIME type, can be improved
+          encoding: "utf-8", // Default encoding, can be improved
         },
       };
     } catch (error) {
-      logger.debug(`Error reading file: ${filePath}`, error);
+      logger.debug({
+        message: `Error reading file: ${filePath}`,
+        error,
+      });
       throw error;
     }
   }
 
-  static readonly resolveEncoding = (encoding: unknown, defaultValue: BufferEncoding = 'utf-8'): BufferEncoding => {
-    if (
-      encoding === null
-      || encoding === undefined
-      || typeof encoding !== 'string'
-    ) {
+  /**
+   * Check if a file matches a size policy's extension filter.
+   */
+  private static matchesPolicyExtensions(filePath: string, policy: SizePolicy): boolean {
+    if (!policy.extensions || policy.extensions.length === 0) {
+      return true;
+    }
+    return policy.extensions.some((ext) => filePath.endsWith(ext));
+  }
+
+  /**
+   * Check if a file matches a size policy's pattern filter.
+   */
+  private static matchesPolicyPattern(filePath: string, policy: SizePolicy): boolean {
+    if (!policy.pattern) {
+      return true;
+    }
+    try {
+      const regex = new RegExp(policy.pattern);
+      return regex.test(filePath);
+    } catch {
+      logger.warn(`Invalid regex pattern in size policy: ${policy.pattern}`);
+      return true;
+    }
+  }
+
+  /**
+   * Apply size policies to file content.
+   * Returns the processed content and whether it was truncated.
+   */
+  static applySizePolicy(
+    content: string,
+    filePath: string,
+    policies: SizePolicy | SizePolicy[] | null,
+  ): { data: string; truncated: boolean };
+  static applySizePolicy(
+    content: string[],
+    filePath: string | null,
+    policies: SizePolicy | SizePolicy[] | null,
+  ): { data: string[]; truncated: boolean };
+  static applySizePolicy(
+    content: string | string[],
+    filePath: string | null,
+    policies: SizePolicy | SizePolicy[] | null,
+  ): { data: string | string[]; truncated: boolean } {
+    if (!policies) {
+      return { data: content, truncated: false };
+    }
+
+    if (Array.isArray(content)) {
+      return ResourceUtils.applySizePolicyToFileList(content, policies);
+    }
+
+    const policyList = Array.isArray(policies) ? policies : [policies];
+    let currentContent = content as string;
+    let cumulativeSize = 0;
+    let truncated = false;
+
+    for (const policy of policyList) {
+      if (
+        !ResourceUtils.matchesPolicyExtensions(filePath ?? "", policy) ||
+        !ResourceUtils.matchesPolicyPattern(filePath ?? "", policy)
+      ) {
+        continue;
+      }
+
+      if (policy.unit === "bytes") {
+        const size = policy.cumulative
+          ? cumulativeSize + currentContent.length
+          : currentContent.length;
+        if (size > policy.limit) {
+          if (policy.mode === "reject") {
+            return { data: "", truncated: true };
+          }
+          if (policy.mode === "warn") {
+            logger.warn(
+              `File ${filePath} exceeds size limit of ${policy.limit} bytes (actual: ${size})`,
+            );
+            return { data: currentContent, truncated: false };
+          }
+          if (policy.mode === "truncate") {
+            currentContent = currentContent.substring(0, policy.limit);
+            truncated = true;
+          }
+        }
+        cumulativeSize += currentContent.length;
+      } else if (policy.unit === "lines") {
+        const lines = currentContent.split("\n");
+        if (lines.length > policy.limit) {
+          if (policy.mode === "reject") {
+            return { data: "", truncated: true };
+          }
+          if (policy.mode === "warn") {
+            logger.warn(
+              `File ${filePath} exceeds line limit of ${policy.limit} lines (actual: ${lines.length})`,
+            );
+            return { data: currentContent, truncated: false };
+          }
+          if (policy.mode === "truncate") {
+            currentContent = lines.slice(0, policy.limit).join("\n");
+            truncated = true;
+          }
+        }
+      }
+    }
+
+    return { data: currentContent, truncated };
+  }
+
+  /**
+   * Apply size policies to a directory file listing.
+   * Limits the number of files returned based on 'files' unit policies.
+   */
+  private static applySizePolicyToFileList(
+    files: string[],
+    policies: SizePolicy | SizePolicy[] | null,
+  ): { data: string[]; truncated: boolean } {
+    if (!policies) {
+      return { data: files, truncated: false };
+    }
+
+    const policyList = Array.isArray(policies) ? policies : [policies];
+    let currentFiles = files;
+    let truncated = false;
+
+    for (const policy of policyList) {
+      if (policy.unit !== "files") {
+        continue;
+      }
+
+      if (currentFiles.length > policy.limit) {
+        if (policy.mode === "reject") {
+          return { data: [], truncated: true };
+        }
+        if (policy.mode === "warn") {
+          logger.warn(
+            `Directory listing exceeds file limit of ${policy.limit} files (actual: ${currentFiles.length})`,
+          );
+          return { data: currentFiles, truncated: false };
+        }
+        if (policy.mode === "truncate") {
+          currentFiles = currentFiles.slice(0, policy.limit);
+          truncated = true;
+        }
+      }
+    }
+
+    return { data: currentFiles, truncated };
+  }
+
+  static readonly resolveEncoding = (
+    encoding: unknown,
+    defaultValue: BufferEncoding = "utf-8",
+  ): BufferEncoding => {
+    if (encoding === null || encoding === undefined || typeof encoding !== "string") {
       return defaultValue;
     }
 
     const validEncodings: BufferEncoding[] = [
-      'utf-8',
-      'ascii',
-      'utf8',
-      'utf16le',
-      'utf-16le',
-      'ucs2',
-      'ucs-2',
-      'base64',
-      'base64url',
-      'latin1',
-      'binary',
-      'hex',
+      "utf-8",
+      "ascii",
+      "utf8",
+      "utf16le",
+      "utf-16le",
+      "ucs2",
+      "ucs-2",
+      "base64",
+      "base64url",
+      "latin1",
+      "binary",
+      "hex",
     ];
 
     if (validEncodings.includes(encoding as BufferEncoding)) {
@@ -241,28 +497,35 @@ class ResourceUtils {
   static async writeFile(
     filePath: string,
     data: string,
-    options: { encoding?: BufferEncoding | null | undefined } = {},
+    options: { encoding?: BufferEncoding | null | undefined; createIfMissing?: boolean } = {},
   ): Promise<void> {
     try {
-      const { encoding = 'utf-8' } = options;
+      const { encoding = "utf-8", createIfMissing = false } = options;
+      if (createIfMissing) {
+        const directory = path.dirname(filePath);
+        await mkdir(directory, { recursive: true });
+      }
       await writeFile(filePath, data, { encoding });
     } catch (error) {
-      logger.debug(`Error writing file: ${filePath}`, error);
+      logger.debug({
+        message: `Error writing file: ${filePath}`,
+        error,
+      });
       throw error;
     }
   }
 
-  static async deleteTarget(
-    filePath: string,
-    type: 'file' | 'directory',
-  ): Promise<void> {
+  static async deleteTarget(filePath: string, type: "file" | "directory"): Promise<void> {
     try {
-      await rm(filePath, { force: true, recursive: type === 'directory' });
+      await rm(filePath, { force: true, recursive: type === "directory" });
     } catch (error) {
-      logger.debug(`Error deleting file: ${filePath}`, error);
+      logger.debug({
+        message: `Error deleting file: ${filePath}`,
+        error,
+      });
       throw error;
     }
   }
 }
 
-export { ResourceUtils, type ResourceMeta };
+export { type ResourceMeta, ResourceUtils };

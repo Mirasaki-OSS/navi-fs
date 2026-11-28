@@ -3,17 +3,17 @@
  * @type {import("prettier").Config}
  */
 const config = {
-  trailingComma: 'es5',
+  trailingComma: "es5",
   semi: true,
   singleQuote: true,
   useTabs: false,
-  arrowParens: 'always',
+  arrowParens: "always",
   bracketSameLine: false,
-  endOfLine: 'lf',
+  endOfLine: "lf",
   bracketSpacing: true,
-  embeddedLanguageFormatting: 'auto',
+  embeddedLanguageFormatting: "auto",
   experimentalTernaries: false,
-  htmlWhitespaceSensitivity: 'css',
+  htmlWhitespaceSensitivity: "css",
   insertPragma: false,
   jsxSingleQuote: false,
   singleAttributePerLine: true,
