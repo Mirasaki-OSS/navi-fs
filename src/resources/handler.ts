@@ -291,39 +291,13 @@ class ResourceHandler {
     query: {
       currentLocation: string;
       encoding?: BufferEncoding | null | undefined;
+      create?: boolean;
     },
     req: Request,
     res: Response,
     next: NextFunction,
   ): Promise<void> => {
-    const { currentLocation, encoding } = query;
-    const stats = await stat(currentLocation);
-    const currentIsFile = stats.isFile();
-
-    if (!currentIsFile) {
-      next(
-        new APIError({
-          code: APIErrorCode.BAD_REQUEST,
-          message: "Invalid request",
-          status: 400,
-          details: {
-            slug: resource.slug,
-            query,
-            error: "The current target/cursor is not a file, and cannot be written to",
-          },
-        }),
-      );
-      return;
-    }
-
-    logger.debug({
-      message: `[POST] Resource found: ${resource.slug}`,
-      resource,
-      query,
-      currentLocation,
-      currentIsFile,
-      ...stats,
-    });
+    const { currentLocation, encoding, create = false } = query;
 
     if (typeof req.body !== "string") {
       next(
@@ -341,7 +315,46 @@ class ResourceHandler {
       return;
     }
 
-    await ResourceUtils.writeFile(currentLocation, req.body, { encoding });
+    if (!create) {
+      const stats = await stat(currentLocation);
+      const currentIsFile = stats.isFile();
+
+      if (!currentIsFile) {
+        next(
+          new APIError({
+            code: APIErrorCode.BAD_REQUEST,
+            message: "Invalid request",
+            status: 400,
+            details: {
+              slug: resource.slug,
+              query,
+              error: "The current target/cursor is not a file, and cannot be written to",
+            },
+          }),
+        );
+        return;
+      }
+
+      logger.debug({
+        message: `[POST] Resource found (write): ${resource.slug}`,
+        resource,
+        query,
+        currentLocation,
+        currentIsFile: true,
+      });
+    } else {
+      logger.debug({
+        message: `[POST] Resource found (create): ${resource.slug}`,
+        resource,
+        query,
+        currentLocation,
+      });
+    }
+
+    await ResourceUtils.writeFile(currentLocation, req.body, { 
+      encoding,
+      createIfMissing: create,
+    });
 
     res.status(201).end();
   };
@@ -552,10 +565,41 @@ class ResourceHandler {
       return this.handleExecuteSSERequest(resource, { cwd }, req, res, next);
     }
 
-    const currentLocation =
-      resource.type === "file"
-        ? await ResourceHandler.getResourceFile(resource, { cursor })
-        : await ResourceUtils.resolveDirectoryCursor(resource.target, cursor);
+    let currentLocation: string;
+
+    if (resource.type === "file") {
+      try {
+        currentLocation = await ResourceHandler.getResourceFile(resource, { cursor });
+      } catch (error) {
+        // If POST with create=true and file not found, skip the check
+        if (
+          req.method === "POST" &&
+          query.create === "true" &&
+          error instanceof APIError &&
+          error.code === APIErrorCode.NOT_FOUND
+        ) {
+          // Construct the file path with cursor
+          if (!resource.extensions?.length) {
+            currentLocation = cursor
+              ? path.resolve(resource.target, cursor)
+              : resource.target;
+          } else {
+            const targetWithExt = `${resource.target}.${resource.extensions[0]}`;
+            currentLocation = cursor
+              ? path.resolve(path.dirname(resource.target), cursor)
+              : targetWithExt;
+          }
+        } else {
+          throw error;
+        }
+      }
+    } else {
+      currentLocation = await ResourceUtils.resolveDirectoryCursor(
+        resource.target,
+        cursor,
+        req.method === "POST" && query.create === "true",
+      );
+    }
 
     if (req.method === "GET" || req.method === "HEAD") {
       return await this.handleGetRequest(
@@ -576,6 +620,7 @@ class ResourceHandler {
         {
           currentLocation,
           encoding: ResourceUtils.resolveEncoding(query.encoding?.toString(), "utf-8"),
+          create: query.create === "true",
         },
         req,
         res,

@@ -1,5 +1,5 @@
 import { constants } from "node:fs";
-import { access, readdir, readFile, realpath, rm, stat, writeFile } from "node:fs/promises";
+import { access, mkdir, readdir, readFile, realpath, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { logger } from "../logger";
 import { APIError, APIErrorCode } from "../modules/api-errors";
@@ -26,7 +26,7 @@ class ResourceUtils {
     );
   }
 
-  static async resolveDirectoryCursor(root: string, cursor: string | null): Promise<string> {
+  static async resolveDirectoryCursor(root: string, cursor: string | null, allowNonExistent = false): Promise<string> {
     const resolvedRoot = path.resolve(root);
     const target = path.resolve(resolvedRoot, cursor ?? "");
     const forbidden = () =>
@@ -40,7 +40,34 @@ class ResourceUtils {
       throw forbidden();
     }
 
-    const [realRoot, realTarget] = await Promise.all([realpath(resolvedRoot), realpath(target)]);
+    const realRoot = await realpath(resolvedRoot);
+    let realTarget = target;
+    
+    if (!allowNonExistent) {
+      realTarget = await realpath(target);
+    } else {
+      try {
+        realTarget = await realpath(target);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+          // For non-existent paths, resolve the parent directory and check containment
+          const parentPath = path.dirname(target);
+          try {
+            realTarget = await realpath(parentPath);
+            realTarget = path.resolve(realTarget, path.basename(target));
+          } catch (parentError) {
+            // If parent doesn't exist either, still proceed with the calculated path
+            if ((parentError as NodeJS.ErrnoException).code !== "ENOENT") {
+              throw parentError;
+            }
+            realTarget = target;
+          }
+        } else {
+          throw error;
+        }
+      }
+    }
+    
     if (!ResourceUtils.isContained(realRoot, realTarget)) {
       throw forbidden();
     }
@@ -470,10 +497,14 @@ class ResourceUtils {
   static async writeFile(
     filePath: string,
     data: string,
-    options: { encoding?: BufferEncoding | null | undefined } = {},
+    options: { encoding?: BufferEncoding | null | undefined; createIfMissing?: boolean } = {},
   ): Promise<void> {
     try {
-      const { encoding = "utf-8" } = options;
+      const { encoding = "utf-8", createIfMissing = false } = options;
+      if (createIfMissing) {
+        const directory = path.dirname(filePath);
+        await mkdir(directory, { recursive: true });
+      }
       await writeFile(filePath, data, { encoding });
     } catch (error) {
       logger.debug({

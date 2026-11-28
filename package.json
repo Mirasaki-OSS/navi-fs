@@ -16,7 +16,7 @@
     "pretest": "npm run build",
     "setup:linux": "npm install && cp config.example.yaml config.yaml",
     "setup:windows": "npm install && copy config.example.yaml config.yaml",
-    "test": "mocha dist/test/**/*.js",
+    "test": "mocha dist/test/**/*.{js,mjs}",
     "test:dev": "ts-mocha test/**/*.spec.ts -w --watch-files '**/*.ts'",
     "typecheck": "tsc --noEmit",
     "commit": "cz",

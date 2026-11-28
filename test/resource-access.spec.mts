@@ -4,7 +4,10 @@ import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, readFile, rm, symlink, utimes, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import type { expect as chaiExpect } from "chai";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 describe("Resource access", () => {
   let expect: typeof chaiExpect;
@@ -593,6 +596,111 @@ describe("Resource access", () => {
       expect(await readFile(path.join(directory, "file.txt"), "utf8")).to.equal("content");
       expect((await fetch(`${url}&force=true`, options)).status).to.equal(204);
       await assert.rejects(readFile(path.join(directory, "file.txt")), { code: "ENOENT" });
+    });
+
+    it("creates files and parent directories with create=true parameter", async () => {
+      const file = path.join(root, "new-nested", "created.txt");
+      const url = `${baseUrl}/api/v1/logs?cursor=new-nested%2Fcreated.txt&create=true`;
+      const headers = { "x-api-key": writeKey };
+      const content = "Created with create parameter";
+
+      // Verify file doesn't exist yet
+      await assert.rejects(readFile(file), { code: "ENOENT" });
+
+      // Create the file
+      const response = await fetch(url, {
+        method: "POST",
+        headers: { ...headers, "content-type": "text/plain" },
+        body: content,
+      });
+      expect(response.status).to.equal(201);
+
+      // Verify file exists with correct content
+      expect(await readFile(file, "utf8")).to.equal(content);
+    });
+
+    it("creates files directly in root with create=true parameter", async () => {
+      const file = path.join(root, "direct-create.txt");
+      const url = `${baseUrl}/api/v1/logs?cursor=direct-create.txt&create=true`;
+      const headers = { "x-api-key": writeKey };
+      const content = "Direct creation at root";
+
+      // Verify file doesn't exist yet
+      await assert.rejects(readFile(file), { code: "ENOENT" });
+
+      // Create the file
+      const response = await fetch(url, {
+        method: "POST",
+        headers: { ...headers, "content-type": "text/plain" },
+        body: content,
+      });
+      expect(response.status).to.equal(201);
+
+      // Verify file exists with correct content
+      expect(await readFile(file, "utf8")).to.equal(content);
+    });
+
+    it("overwrites existing files with create=true parameter", async () => {
+      const file = path.join(root, "nested", "overwrite.txt");
+      await writeFile(file, "original");
+
+      const url = `${baseUrl}/api/v1/logs?cursor=nested%2Foverwrite.txt&create=true`;
+      const headers = { "x-api-key": writeKey };
+      const content = "Overwritten content";
+
+      const response = await fetch(url, {
+        method: "POST",
+        headers: { ...headers, "content-type": "text/plain" },
+        body: content,
+      });
+      expect(response.status).to.equal(201);
+
+      // Verify file was overwritten
+      expect(await readFile(file, "utf8")).to.equal(content);
+    });
+
+    it("requires write permission for create=true", async () => {
+      const file = path.join(root, "permission-check.txt");
+      const url = `${baseUrl}/api/v1/logs?cursor=permission-check.txt&create=true`;
+
+      // Try with read key (should fail)
+      const response = await fetch(url, {
+        method: "POST",
+        headers: { "x-api-key": readKey, "content-type": "text/plain" },
+        body: "content",
+      });
+      expect(response.status).to.equal(403);
+
+      // Verify file was not created
+      await assert.rejects(readFile(file), { code: "ENOENT" });
+
+      // Try with write key (should succeed)
+      const response2 = await fetch(url, {
+        method: "POST",
+        headers: { "x-api-key": writeKey, "content-type": "text/plain" },
+        body: "content",
+      });
+      expect(response2.status).to.equal(201);
+
+      // Verify file was created
+      expect(await readFile(file, "utf8")).to.equal("content");
+    });
+
+    it("respects encoding with create=true parameter", async () => {
+      const file = path.join(root, "new-encoded.txt");
+      const url = `${baseUrl}/api/v1/logs?cursor=new-encoded.txt&create=true&encoding=base64`;
+      const headers = { "x-api-key": writeKey };
+      const content = "SGVsbG8gV29ybGQ="; // "Hello World" in base64
+
+      const response = await fetch(url, {
+        method: "POST",
+        headers: { ...headers, "content-type": "text/plain" },
+        body: content,
+      });
+      expect(response.status).to.equal(201);
+
+      // Verify file exists with decoded content
+      expect(await readFile(file, "utf8")).to.equal("Hello World");
     });
   });
 
