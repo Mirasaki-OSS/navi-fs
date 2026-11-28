@@ -15,9 +15,11 @@
 </p>
 
 > [!CAUTION]
-> All versions before v2 are unmaintained, unsupported, and unsafe to use. They have
-> unpatched security vulnerabilities. Stop using those versions and migrate to v2
-> as soon as possible. The latest release is v2 or higher.
+> The v2 update is a complete rewrite focusing on completeness, ease-of-use, and security.
+> 
+> Previous versions are now unmaintained, and no longer supported. If your `v1` API key is secure there is no need to rush migrating to `v2`. However, do note there is a path traversal issue in `v1` that allows anyone with the master API key to access any files your service user has access to. If you're concerned about *your* API key, simply regenerate it, update the configuration file and rebuild.
+> 
+> The rewrite is designed with security best-practices in mind, and I encourage anyone to try and exploit it.
 
 ## 🔨 Installation
 
