@@ -40,6 +40,11 @@
       "key": "test-directory-api-key",
       "value": "test-directory-f83543201db92186d5ecea02190095c599058d708d3828050aa71dc6a8e19b84bc6ebbdfcdfbf6c0eab87a8d8bbaf9e52f32d07ec78fb4db3c6ec0cfcf6b7a9e",
       "type": "string"
+    },
+    {
+      "key": "search-query",
+      "value": "NaviFS",
+      "type": "string"
     }
   ],
   "item": [
@@ -799,6 +804,189 @@
               ]
             },
             "description": "Show allowed HTTP methods for directory resource"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Search Operations",
+      "item": [
+        {
+          "name": "GET test-directory - Search Paths & Content",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/test-directory/search?q={{search-query}}&recursive=true&limit=100",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "test-directory",
+                "search"
+              ],
+              "query": [
+                {
+                  "key": "q",
+                  "value": "{{search-query}}",
+                  "description": "Required, case-insensitive literal search text."
+                },
+                {
+                  "key": "cursor",
+                  "value": "src",
+                  "description": "Optional contained directory path.",
+                  "disabled": true
+                },
+                {
+                  "key": "recursive",
+                  "value": "true",
+                  "description": "Set true to include nested directories."
+                },
+                {
+                  "key": "extension",
+                  "value": ".ts",
+                  "description": "Optional suffix filter. Repeat to match multiple suffixes.",
+                  "disabled": true
+                },
+                {
+                  "key": "extension",
+                  "value": ".md",
+                  "description": "An additional suffix filter.",
+                  "disabled": true
+                },
+                {
+                  "key": "minSize",
+                  "value": "1",
+                  "description": "Minimum file size in bytes, inclusive.",
+                  "disabled": true
+                },
+                {
+                  "key": "maxSize",
+                  "value": "1048576",
+                  "description": "Maximum file size in bytes, inclusive.",
+                  "disabled": true
+                },
+                {
+                  "key": "modifiedAfter",
+                  "value": "2024-01-01T00:00:00.000Z",
+                  "description": "Optional inclusive lower bound for modification time.",
+                  "disabled": true
+                },
+                {
+                  "key": "modifiedBefore",
+                  "value": "2026-12-31T23:59:59.999Z",
+                  "description": "Optional inclusive upper bound for modification time.",
+                  "disabled": true
+                },
+                {
+                  "key": "limit",
+                  "value": "100",
+                  "description": "Results per page, from 1 to 500."
+                },
+                {
+                  "key": "offset",
+                  "value": "0",
+                  "description": "Result offset, capped at 10000.",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "Search relative paths and UTF-8 file contents. Results report matchedIn (path/content) without returning file contents. Set the search-query collection variable to change q. Scan limits and pagination status are returned in meta.",
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "x-api-key",
+                  "type": "string"
+                },
+                {
+                  "key": "value",
+                  "value": "{{test-directory-api-key}}",
+                  "type": "string"
+                },
+                {
+                  "key": "in",
+                  "value": "header",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "GET test-file - Search Configured File",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/test-file/search?q={{search-query}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "test-file",
+                "search"
+              ],
+              "query": [
+                {
+                  "key": "q",
+                  "value": "{{search-query}}",
+                  "description": "Required, case-insensitive literal search text."
+                }
+              ]
+            },
+            "description": "Search the configured file resource by path and UTF-8 content.",
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "x-api-key",
+                  "type": "string"
+                },
+                {
+                  "key": "value",
+                  "value": "{{master-api-key}}",
+                  "type": "string"
+                },
+                {
+                  "key": "in",
+                  "value": "header",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "OPTIONS test-directory/search - Allowed Methods",
+          "request": {
+            "method": "OPTIONS",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/test-directory/search",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "test-directory",
+                "search"
+              ]
+            },
+            "description": "Public OPTIONS request; the Allow header is GET, OPTIONS.",
+            "auth": {
+              "type": "noauth"
+            }
           },
           "response": []
         }

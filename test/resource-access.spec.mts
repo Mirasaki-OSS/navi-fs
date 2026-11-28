@@ -33,6 +33,9 @@ describe("Resource access", () => {
     await mkdir(outside);
     await writeFile(path.join(root, "nested", "inside.txt"), "inside");
     await writeFile(path.join(root, "nested", "authorization.txt"), "original");
+    await writeFile(path.join(root, "nested", "content-match.txt"), "the needle is here");
+    await writeFile(path.join(root, "nested", "needle-path.txt"), "no content match");
+    await writeFile(path.join(root, "nested", "needle-both.txt"), "needle in both places");
     await writeFile(path.join(root, "range.txt"), "0123456789");
     const oldTime = new Date(Date.now() - 120000);
     await utimes(path.join(root, "range.txt"), oldTime, oldTime);
@@ -60,6 +63,11 @@ describe("Resource access", () => {
               { type: "delete", "api-key": deleteKey },
               { type: "all", "api-key": allKey },
             ],
+          },
+          {
+            slug: "search-file",
+            target: path.join(root, "nested", "content-match.txt"),
+            permissions: [{ type: "read", "api-key": readKey }],
           },
           {
             slug: "linked-root",
@@ -258,6 +266,7 @@ describe("Resource access", () => {
         ["/", "GET, HEAD, OPTIONS"],
         ["/api/v1/", "GET, HEAD, OPTIONS"],
         ["/api/v1/logs", "GET, HEAD, POST, DELETE, OPTIONS"],
+        ["/api/v1/logs/search", "GET, OPTIONS"],
         ["/api/v1/run/execute", "POST, OPTIONS"],
       ]) {
         const options = await fetch(`${baseUrl}${endpoint}`, { method: "OPTIONS" });
@@ -418,6 +427,96 @@ describe("Resource access", () => {
       expect(Buffer.from(await range.arrayBuffer()).equals(contents.subarray(start))).to.equal(
         true,
       );
+    });
+  });
+
+  describe("search", () => {
+    it("searches file paths and UTF-8 contents and applies filters", async () => {
+      const params = new URLSearchParams({
+        q: "needle",
+        recursive: "true",
+        extension: ".txt",
+        cursor: "nested",
+      });
+      const response = await fetch(`${baseUrl}/api/v1/logs/search?${params}`, {
+        headers: { "x-api-key": readKey },
+      });
+      expect(response.status).to.equal(200);
+      const body = (await response.json()) as {
+        data: Array<{ path: string; matchedIn: string[] }>;
+        meta: { count: number; hasMore: boolean; truncated: boolean };
+      };
+      expect(body.data.map(({ path, matchedIn }) => [path, matchedIn])).to.deep.equal([
+        ["nested/content-match.txt", ["content"]],
+        ["nested/needle-both.txt", ["path", "content"]],
+        ["nested/needle-path.txt", ["path"]],
+      ]);
+      expect(body.meta).to.include({ count: 3, hasMore: false, truncated: false });
+
+      const fileResource = await fetch(
+        `${baseUrl}/api/v1/search-file/search?q=needle`,
+        { headers: { "x-api-key": readKey } },
+      );
+      const fileBody = (await fileResource.json()) as {
+        data: Array<{ path: string; matchedIn: string[] }>;
+      };
+      expect(fileResource.status).to.equal(200);
+      expect(fileBody.data.map(({ path, matchedIn }) => [path, matchedIn])).to.deep.equal([
+        ["content-match.txt", ["content"]],
+      ]);
+
+      const filtered = await fetch(
+        `${baseUrl}/api/v1/logs/search?${new URLSearchParams({
+          q: "needle",
+          recursive: "true",
+          extension: ".txt",
+          cursor: "nested",
+          minSize: "19",
+          limit: "1",
+        })}`,
+        { headers: { "x-api-key": readKey } },
+      );
+      const filteredBody = (await filtered.json()) as {
+        data: Array<{ path: string }>;
+        meta: { hasMore: boolean; offset: number };
+      };
+      expect(filtered.status).to.equal(200);
+      expect(filteredBody.data.map(({ path }) => path)).to.deep.equal(["nested/needle-both.txt"]);
+      expect(filteredBody.meta).to.include({ hasMore: false, offset: 0 });
+
+      const page = await fetch(
+        `${baseUrl}/api/v1/logs/search?${new URLSearchParams({
+          q: "needle",
+          recursive: "true",
+          extension: ".txt",
+          cursor: "nested",
+          limit: "1",
+          offset: "1",
+        })}`,
+        { headers: { "x-api-key": readKey } },
+      );
+      const pageBody = (await page.json()) as {
+        data: Array<{ path: string }>;
+        meta: { hasMore: boolean };
+      };
+      expect(pageBody.data.map(({ path }) => path)).to.deep.equal(["nested/needle-both.txt"]);
+      expect(pageBody.meta.hasMore).to.equal(true);
+    });
+
+    it("requires read permission and validates search parameters and cursor containment", async () => {
+      const url = `${baseUrl}/api/v1/logs/search`;
+      expect((await fetch(`${url}?q=needle`)).status).to.equal(403);
+      expect(
+        (await fetch(`${url}?q=needle`, { headers: { "x-api-key": writeKey } })).status,
+      ).to.equal(403);
+
+      const missingQuery = await fetch(url, { headers: { "x-api-key": readKey } });
+      expect(missingQuery.status).to.equal(400);
+
+      const outsideCursor = await fetch(`${url}?q=needle&cursor=outside-link`, {
+        headers: { "x-api-key": readKey },
+      });
+      expect(outsideCursor.status).to.equal(403);
     });
   });
 

@@ -23,6 +23,7 @@
     "**/coverage": true
   },
   "cSpell.words": [
+    "apikey",
     "dentries",
     "Flaticon",
     "Instantiator",
@@ -30,6 +31,7 @@
     "mmap",
     "myapp",
     "navi",
+    "noauth",
     "rtracer",
     "secretkey"
   ],

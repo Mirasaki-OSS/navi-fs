@@ -43,6 +43,11 @@ const handleResource: RequestHandler = async (req, res, next) => {
   return handler.handleRequest(req, res, next);
 };
 
+const handleSearch: RequestHandler = async (req, res, next) => {
+  const handler = await ResourceHandler.getInstance();
+  return handler.handleSearchRequest(req, res, next);
+};
+
 const handleExecution: RequestHandler = async (req, res, next) => {
   const handler = await ResourceHandler.getInstance();
   return handler.handleRequest(req, res, next, "execute");
@@ -60,6 +65,7 @@ const resourceExists: RequestHandler = async (req, _res, next) => {
 
 const listMethods = "GET, HEAD, OPTIONS";
 const resourceMethods = "GET, HEAD, POST, DELETE, OPTIONS";
+const searchMethods = "GET, OPTIONS";
 const executionMethods = "POST, OPTIONS";
 
 v1Router
@@ -75,6 +81,12 @@ v1Router
   })
   .options(options(listMethods))
   .all(methodNotAllowed(listMethods));
+
+v1Router
+  .route("/:slug/search")
+  .get(Authentication.requireAuthorization("read"), handleSearch)
+  .options(resourceExists, options(searchMethods))
+  .all(resourceExists, methodNotAllowed(searchMethods));
 
 v1Router
   .route("/:slug/execute")
