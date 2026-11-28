@@ -72,7 +72,7 @@ class ResourceUtils {
       throw forbidden();
     }
 
-    return target;
+    return realTarget;
   }
 
   /**

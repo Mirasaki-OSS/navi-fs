@@ -182,6 +182,32 @@ the checks cannot prevent filesystem changes between validation and access.
 
 ---
 
+## 🔎 `GET /api/v1/:slug/search`
+
+Searches paths and UTF-8 text contents within a resource. Requires the resource's `read` permission.
+
+**Query Parameters:**
+
+- `q` – Required literal, case-insensitive query (up to 256 characters).
+- `cursor` – Optional directory path relative to the resource root; must remain inside that root.
+- `recursive` – If `true`, search nested directories. Defaults to `false`.
+- `extension` – Optional file suffix filter; repeat to match multiple suffixes (for example, `extension=.txt&extension=.md`).
+- `minSize`, `maxSize` – Optional inclusive file-size bounds in bytes.
+- `modifiedAfter`, `modifiedBefore` – Optional date bounds; accept date strings understood by JavaScript's `Date.parse`.
+- `limit` – Results per page, from 1 to 500; defaults to 100.
+- `offset` – Result offset; defaults to 0 and is capped at 10,000.
+
+Directory resources are searched relative to their root (or `cursor`). File resources search their configured file. Results contain relative paths, matching fields (`path` and/or `content`), file size, and last-modified time; file contents are not returned. Content matching skips files containing NUL bytes. Each request inspects at most 10,000 candidate paths and reads at most 50 MiB of file contents, with at most 5 MiB read from any one file. The directory walker still enumerates the requested tree to build and order candidates, so very large trees may take time. `meta.truncated` indicates a scan limit was reached; `meta.hasMore` indicates more results are available on a later page.
+
+**Example:**
+
+```text
+GET /api/v1/logs/search?q=timeout&recursive=true&extension=.log&limit=50
+x-api-key: <RESOURCE_API_KEY>
+```
+
+---
+
 ## 📥 `POST /api/v1/:slug`
 
 Writes to a file or creates a new file.
@@ -327,26 +353,17 @@ This section outlines the current and upcoming features and enhancements planned
 
 - [x] **Improved Error Handling:** Specific error codes and messages for common failures.
 - [x] **File Streaming Improvements:** Stream large files and support single byte ranges and conditional requests.
-- [ ] **Search Functionality:** Add advanced search and filtering capabilities for resource queries.
-- [ ] **Cloud Storage Integrations:** Support for external cloud storage providers (e.g., AWS S3, Google Cloud Storage).
-- [ ] **Frontend Panel/Dashboard** for administrators (long-term vision).
-  - [ ] **User Authentication & Authorization:** Allow users to create accounts, authenticate via OAuth, and manage their API keys.
-  - [ ] **Resource Management Dashboard:** Build an admin interface for better management and exploration of resources.
+- [x] **Search Functionality:** Add advanced search and filtering capabilities for resource queries. See [search documentation](#-get-apiv1slugsearch).
+- [ ] ~~**Cloud Storage Integrations:** Support for external cloud storage providers (e.g., AWS S3, Google Cloud Storage).~~
+  - Note: Cloud storage providers generally provide an ease-to-use interface for interacting with their systems, and this is therefore considered out-of-scope for this project.
 
-### 📖 Roadmap Entry: OS-Level File Caching Documentation
+### 📖 OS-Level File Caching Documentation
 
-**Description**: Document the operating system's file caching mechanism, focusing on how the OS optimizes file reads by caching frequently accessed data in memory. This will include the use of page caches, filesystem caches, and memory-mapped files for improving read performance.
-
-- [ ] Explain how the OS stores file data in memory after the first read to optimize subsequent file access.
-- [ ] Detail the page cache and filesystem cache mechanisms.
-- [ ] Provide insights into write-back vs. write-through caching strategies.
-- [ ] Include a section on memory-mapped files (mmap) and how they interact with caching.
-- [ ] Describe cache eviction and limitations (e.g., when memory is low, and files are evicted).
-- [ ] Discuss the benefits of caching for performance and disk wear reduction, and explain scenarios where caching may not be effective.
-
-If you have any suggestions or would like to see a specific feature, feel free to open an issue or submit a pull request!
+Documents the operating system's file caching mechanism, focusing on how the OS optimizes file reads by caching frequently accessed data in memory. See the [OS-level file caching explanation](./docs/os-file-caching.md).
 
 ## 🤝 Contributing
+
+If you have any suggestions or would like to see a specific feature, feel free to open an issue or submit a pull request!
 
 We welcome contributions of all kinds! Whether it's fixing a bug, improving documentation, suggesting a new feature, or helping with tests — every bit helps make NaviFS better for everyone.
 
@@ -357,7 +374,7 @@ To contribute: (Please note the project is in an early stage, and currently does
 3. If applicable, add tests for your changes
 4. **Submit a pull request** with a clear description of your work
 
-Before submitting, please review our [Code of Conduct](./CODE_OF_CONDUCT.md) and [Contribution Guidelines](./CONTRIBUTING.md) (coming soon).
+Before submitting, please review our [Code of Conduct](./CODE_OF_CONDUCT.md) and [Contribution Guidelines](./CONTRIBUTING.md).
 
 > Found a bug or have an idea? Open an issue — let’s talk!
 

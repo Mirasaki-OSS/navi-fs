@@ -9,6 +9,7 @@ import { APIError, APIErrorCode } from "../modules/api-errors";
 import { typedResponse } from "../response";
 import { type ParsedResource, ResourceParser } from "./parser";
 import type { CacheControlPolicy } from "./schema";
+import { badSearchRequest, DEFAULT_SEARCH_LIMIT, getSearchQueryString, MAX_SEARCH_BYTES, MAX_SEARCH_FILES, MAX_SEARCH_LIMIT, MAX_SEARCH_OFFSET, MAX_SEARCH_QUERY_LENGTH, parseSearchDate, parseSearchExtensions, parseSearchInteger, searchFileContents } from './search';
 import { ResourceUtils } from "./utils";
 
 const hashAny = (data: unknown): string =>
@@ -281,6 +282,180 @@ class ResourceHandler {
         currentLocation,
         recursive,
         responseType,
+        truncated,
+      },
+    });
+  };
+
+  public readonly handleSearchRequest = async (
+    req: Request,
+    res: Response,
+    next: NextFunction,
+  ): Promise<void> => {
+    const { slug } = req.params;
+    const resource = this.parser.filters.bySlug(slug);
+    if (!resource) {
+      next(
+        new APIError({
+          code: APIErrorCode.NOT_FOUND,
+          message: "Resource not found",
+          status: 404,
+          details: { slug, query: req.query },
+        }),
+      );
+      return;
+    }
+
+    const query = getSearchQueryString(req.query.q, "q")?.trim();
+    if (!query) {
+      throw badSearchRequest('"q" is required and must not be empty');
+    }
+    if (query.length > MAX_SEARCH_QUERY_LENGTH) {
+      throw badSearchRequest(`"q" must be at most ${MAX_SEARCH_QUERY_LENGTH} characters`);
+    }
+
+    const cursor = getSearchQueryString(req.query.cursor, "cursor") || null;
+    const recursiveRaw = getSearchQueryString(req.query.recursive, "recursive");
+    if (recursiveRaw !== undefined && recursiveRaw !== "true" && recursiveRaw !== "false") {
+      throw badSearchRequest('"recursive" must be "true" or "false"');
+    }
+    const recursive = recursiveRaw === "true";
+    const extensions = parseSearchExtensions(req.query.extension);
+    const minSize = parseSearchInteger(req.query.minSize, "minSize");
+    const maxSize = parseSearchInteger(req.query.maxSize, "maxSize");
+    const modifiedAfter = parseSearchDate(req.query.modifiedAfter, "modifiedAfter");
+    const modifiedBefore = parseSearchDate(req.query.modifiedBefore, "modifiedBefore");
+    const limit = parseSearchInteger(req.query.limit, "limit") ?? DEFAULT_SEARCH_LIMIT;
+    const offset = parseSearchInteger(req.query.offset, "offset") ?? 0;
+
+    if (minSize !== undefined && maxSize !== undefined && minSize > maxSize) {
+      throw badSearchRequest('"minSize" must not be greater than "maxSize"');
+    }
+    if (
+      modifiedAfter !== undefined &&
+      modifiedBefore !== undefined &&
+      modifiedAfter > modifiedBefore
+    ) {
+      throw badSearchRequest('"modifiedAfter" must not be later than "modifiedBefore"');
+    }
+    if (limit < 1 || limit > MAX_SEARCH_LIMIT) {
+      throw badSearchRequest(`"limit" must be between 1 and ${MAX_SEARCH_LIMIT}`);
+    }
+    if (offset > MAX_SEARCH_OFFSET) {
+      throw badSearchRequest(`"offset" must not exceed ${MAX_SEARCH_OFFSET}`);
+    }
+
+    let filePaths: string[];
+    if (resource.type === "file") {
+      if (cursor) {
+        throw badSearchRequest('"cursor" is only supported for directory resources');
+      }
+      filePaths = [await ResourceHandler.getResourceFile(resource, { cursor: null })];
+    } else {
+      const searchRoot = await ResourceUtils.resolveDirectoryCursor(resource.target, cursor);
+      if (!(await stat(searchRoot)).isDirectory()) {
+        throw badSearchRequest('"cursor" must resolve to a directory');
+      }
+      filePaths = await ResourceUtils.listFiles(
+        searchRoot,
+        recursive,
+        resource.extensions ?? [],
+        resource.target,
+      );
+    }
+
+    filePaths.sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+    const scanPaths = filePaths.slice(0, MAX_SEARCH_FILES);
+    let truncated = filePaths.length > MAX_SEARCH_FILES;
+    let scannedFiles = 0;
+    let scannedBytes = 0;
+    let hasMore = false;
+    const matches: Array<{
+      path: string;
+      matchedIn: ("path" | "content")[];
+      size: number;
+      lastModified: string;
+    }> = [];
+    const searchRoot =
+      resource.type === "directory" ? resource.target : path.dirname(resource.target);
+    const lowerQuery = query.toLowerCase();
+
+    for (const filePath of scanPaths) {
+      const stats = await stat(filePath);
+      if (!stats.isFile()) {
+        continue;
+      }
+
+      const relativePath = path.relative(searchRoot, filePath).split(path.sep).join("/");
+      const lowerPath = relativePath.toLowerCase();
+      if (extensions.length > 0 && !extensions.some((extension) => lowerPath.endsWith(extension))) {
+        continue;
+      }
+      if (
+        (minSize !== undefined && stats.size < minSize) ||
+        (maxSize !== undefined && stats.size > maxSize) ||
+        (modifiedAfter !== undefined && stats.mtimeMs < modifiedAfter) ||
+        (modifiedBefore !== undefined && stats.mtimeMs > modifiedBefore)
+      ) {
+        continue;
+      }
+
+      scannedFiles++;
+      const matchedIn: ("path" | "content")[] = [];
+      if (lowerPath.includes(lowerQuery)) {
+        matchedIn.push("path");
+      }
+
+      const remainingBytes = MAX_SEARCH_BYTES - scannedBytes;
+      if (remainingBytes > 0) {
+        const contentSearch = await searchFileContents(filePath, query, stats.size, remainingBytes);
+        scannedBytes += contentSearch.bytesRead;
+        if (contentSearch.matches) {
+          matchedIn.push("content");
+        }
+        truncated ||= contentSearch.truncated;
+      } else {
+        truncated = true;
+      }
+
+      if (matchedIn.length > 0) {
+        matches.push({
+          path: relativePath,
+          matchedIn,
+          size: stats.size,
+          lastModified: stats.mtime.toISOString(),
+        });
+        if (matches.length > offset + limit) {
+          hasMore = true;
+          break;
+        }
+      }
+    }
+
+    if (scanPaths.length < filePaths.length) {
+      truncated = true;
+    }
+
+    typedResponse(res, {
+      data: matches.slice(offset, offset + limit),
+      meta: {
+        slug,
+        query: {
+          q: query,
+          cursor,
+          recursive,
+          extension: extensions,
+          minSize,
+          maxSize,
+          modifiedAfter,
+          modifiedBefore,
+        },
+        count: Math.max(0, Math.min(limit, matches.length - offset)),
+        limit,
+        offset,
+        hasMore,
+        scannedFiles,
+        scannedBytes,
         truncated,
       },
     });
