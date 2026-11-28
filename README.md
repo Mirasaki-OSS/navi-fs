@@ -17,7 +17,7 @@
 > [!CAUTION]
 > All versions before v2 are unmaintained, unsupported, and unsafe to use. They have
 > unpatched security vulnerabilities. Stop using those versions and migrate to v2
-> as soon as possible. The latest release is v2 or higher.
+> as soon as possible.
 
 ## 🔨 Installation
 
