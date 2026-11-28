@@ -333,20 +333,13 @@ This section outlines the current and upcoming features and enhancements planned
   - [ ] **User Authentication & Authorization:** Allow users to create accounts, authenticate via OAuth, and manage their API keys.
   - [ ] **Resource Management Dashboard:** Build an admin interface for better management and exploration of resources.
 
-### 📖 Roadmap Entry: OS-Level File Caching Documentation
+### 📖 OS-Level File Caching Documentation
 
-**Description**: Document the operating system's file caching mechanism, focusing on how the OS optimizes file reads by caching frequently accessed data in memory. This will include the use of page caches, filesystem caches, and memory-mapped files for improving read performance.
-
-- [ ] Explain how the OS stores file data in memory after the first read to optimize subsequent file access.
-- [ ] Detail the page cache and filesystem cache mechanisms.
-- [ ] Provide insights into write-back vs. write-through caching strategies.
-- [ ] Include a section on memory-mapped files (mmap) and how they interact with caching.
-- [ ] Describe cache eviction and limitations (e.g., when memory is low, and files are evicted).
-- [ ] Discuss the benefits of caching for performance and disk wear reduction, and explain scenarios where caching may not be effective.
-
-If you have any suggestions or would like to see a specific feature, feel free to open an issue or submit a pull request!
+Documents the operating system's file caching mechanism, focusing on how the OS optimizes file reads by caching frequently accessed data in memory. See the [OS-level file caching explanation](./docs/os-file-caching.md).
 
 ## 🤝 Contributing
+
+If you have any suggestions or would like to see a specific feature, feel free to open an issue or submit a pull request!
 
 We welcome contributions of all kinds! Whether it's fixing a bug, improving documentation, suggesting a new feature, or helping with tests — every bit helps make NaviFS better for everyone.
 
